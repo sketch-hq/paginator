@@ -10,7 +10,7 @@ defmodule Paginator.DataCase do
       import Paginator.Factory
 
       alias Paginator.{Page, Page.Metadata}
-      alias Paginator.{Customer, Address, Payment}
+      alias Paginator.{Customer, Address, Payment, Boat, Airplane}
     end
   end
 
