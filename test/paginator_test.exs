@@ -956,6 +956,48 @@ defmodule PaginatorTest do
     assert page.metadata.after == nil
   end
 
+  test "paginate with nullable cursor and ascending order" do
+    c = insert(:customer, %{name: "Bob"})
+
+    p1 = insert(:payment, customer: c, charged_at: nil)
+    p2 = insert(:payment, customer: c, charged_at: nil)
+    p3 = insert(:payment, customer: c, charged_at: days_ago(6))
+    p4 = insert(:payment, customer: c, charged_at: days_ago(11))
+
+    query = from(p in Payment, where: p.customer_id == ^c.id, order_by: [:charged_at, :id])
+    opts = [cursor_fields: [charged_at: :asc, id: :asc], limit: 2]
+
+    page = Repo.paginate(query, opts)
+
+    assert to_ids(page.entries) == to_ids([p4, p3])
+
+    page = Repo.paginate(query, opts ++ [after: page.metadata.after])
+
+    assert to_ids(page.entries) == to_ids([p1, p2])
+  end
+
+  test "paginate with nullable cursor and descending order" do
+    c = insert(:customer, %{name: "Bob"})
+
+    p1 = insert(:payment, customer: c, charged_at: nil)
+    p2 = insert(:payment, customer: c, charged_at: nil)
+    p3 = insert(:payment, customer: c, charged_at: nil)
+    p4 = insert(:payment, customer: c, charged_at: days_ago(6))
+    p5 = insert(:payment, customer: c, charged_at: days_ago(11))
+    p6 = insert(:payment, customer: c, charged_at: nil)
+
+    query = from(p in Payment, where: p.customer_id == ^c.id, order_by: [desc: :charged_at, asc: :id])
+    opts = [cursor_fields: [charged_at: :desc, id: :asc], limit: 3]
+
+    page = Repo.paginate(query, opts)
+
+    assert to_ids(page.entries) == to_ids([p1, p2, p3])
+
+    page = Repo.paginate(query, opts ++ [after: page.metadata.after])
+
+    assert to_ids(page.entries) == to_ids([p6, p4, p5])
+  end
+
   defp to_ids(entries), do: Enum.map(entries, & &1.id)
 
   defp create_customers_and_payments(_context) do
