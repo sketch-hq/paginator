@@ -6,7 +6,7 @@ defmodule PaginatorTest do
 
   alias Paginator.Cursor
 
-  setup :create_customers_and_payments
+  setup :create_data
 
   test "paginates forward", %{
     payments: {p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12}
@@ -117,7 +117,7 @@ defmodule PaginatorTest do
              }
     end
 
-    test "sorts ascending with after cursor", %{
+    test "sorts create_customers_and_payments ascending with after cursor", %{
       payments: {_p1, p2, p3, _p4, _p5, _p6, _p7, p8, p9, p10, p11, p12}
     } do
       %Page{entries: entries, metadata: metadata} =
@@ -936,6 +936,26 @@ defmodule PaginatorTest do
            }
   end
 
+  test "paginates unions and subqueries including total count", %{
+    boats: {b1, b2, b3, b4, b5, b6},
+    airplanes: {a1, a2, a3, a4, a5}
+  } do
+    opts = [cursor_fields: [:year, :name, :type], sort_direction: :asc, limit: 4, include_total_count: true]
+
+    page = airplanes_and_boats_by_year() |> Repo.paginate(opts)
+
+    assert to_uids(page.entries) == to_uids([b1, b2, a1, a2])
+    assert page.metadata.after == encode_cursor(%{year: a2.year, name: a2.name, type: a2.type})
+
+    page = airplanes_and_boats_by_year() |> Repo.paginate(opts ++ [after: page.metadata.after])
+    assert to_uids(page.entries) == to_uids([a5, b4, b5, a4])
+    assert page.metadata.after == encode_cursor(%{year: a4.year, name: a4.name, type: a4.type})
+
+    page = airplanes_and_boats_by_year() |> Repo.paginate(opts ++ [after: page.metadata.after])
+    assert to_uids(page.entries) == to_uids([a3, b3, b6])
+    assert page.metadata.after == nil
+  end
+
   defp to_ids(entries), do: Enum.map(entries, & &1.id)
 
   defp create_customers_and_payments(_context) do
@@ -966,6 +986,44 @@ defmodule PaginatorTest do
      customers: {c1, c2, c3},
      addresses: {a1, a2, a3},
      payments: {p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12}}
+  end
+
+  defp to_uids(entries), do: Enum.map(entries, &to_uid/1)
+  defp to_uid(%{id: id, entry_type: entry_type}), do: to_uid(id, String.to_atom(entry_type))
+  defp to_uid(%Boat{id: id}), do: to_uid(id, :boat)
+  defp to_uid(%Airplane{id: id}), do: to_uid(id, :airplane)
+  defp to_uid(%{uid: uid}), do: uid
+  defp to_uid(id, type \\ :boat) when is_integer(id) do
+    case type do
+      :boat -> "b" <> Integer.to_string(id)
+      :airplane -> "a" <> Integer.to_string(id)
+      _ -> id
+    end
+  end
+
+  defp create_boats_and_airplanes(_context) do
+    a1 = insert(:airplane, %{name: "Spitfire", year: 1936})
+    a2 = insert(:airplane, %{name: "Mitsubishi Zero", year: 1940})
+    a3 = insert(:airplane, %{name: "Yakovlev Yak-3", year: 1944})
+    a4 = insert(:airplane, %{name: "Messerschmitt Me 262", year: 1944})
+    a5 = insert(:airplane, %{name: "Grumman F6F Hellcat", year: 1942})
+
+    b1 = insert(:boat, %{name: "Black Pearl", year: 1708, type: "galleon", capacity: 250})
+    b2 = insert(:boat, %{name: "RMS Titanic", year: 1911, type: "ocean liner", capacity: 3327})
+    b3 = insert(:boat, %{name: "Oceania", year: 2003, type: "tanker", capacity: 3166353})
+    b4 = insert(:boat, %{name: "HMS Activity", year: 1942, type: "escort carrier", capacity: 10})
+    b5 = insert(:boat, %{name: "USS Activity", year: 1942, type: "battleship", capacity: 2500})
+    b6 = insert(:boat, %{name: "Severodvinsk", year: 2010, type: "nuclear submarine", capacity: 90})
+
+    {:ok,
+      boats: {b1, b2, b3, b4, b5, b6},
+      airplanes: {a1, a2, a3, a4, a5}}
+  end
+
+  defp create_data(context) do
+    {:ok, payments_and_customers} = create_customers_and_payments(context)
+    {:ok, boats_and_airplanes} = create_boats_and_airplanes(context)
+    {:ok, payments_and_customers ++ boats_and_airplanes}
   end
 
   defp payments_by_status(status, direction \\ :asc) do
@@ -1035,6 +1093,41 @@ defmodule PaginatorTest do
       where: p.customer_id == ^customer.id,
       order_by: [{^direction, p.charged_at}, {^direction, p.amount}, {^direction, p.id}]
     )
+  end
+
+  defp boats_struct_query() do
+    from(
+      b in Boat,
+      select: %{
+        id: b.id,
+        name: b.name,
+        type: b.type,
+        year: b.year,
+        entry_type: fragment("'boat'")
+      }
+    )
+  end
+
+  defp airplanes_struct_query() do
+    from(
+      a in Airplane,
+      select: %{
+        id: a.id,
+        name: a.name,
+        type: a.type,
+        year: a.year,
+        entry_type: fragment("'airplane'")
+      }
+    )
+  end
+
+  defp airplanes_and_boats_by_year() do
+    boats_query = boats_struct_query()
+
+    airplanes_struct_query()
+      |> union_all(^boats_query)
+      |> subquery()
+      |> order_by([:year, :name, :type])
   end
 
   defp encode_cursor(value) do

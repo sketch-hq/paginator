@@ -25,5 +25,23 @@ defmodule Paginator.TestMigration do
 
       add(:customer_id, references(:customers))
     end
+
+    create table(:boats) do
+      add(:name, :string)
+      add(:year, :integer)
+      add(:type, :string)
+      add(:capacity, :integer)
+
+      timestamps()
+    end
+
+    create table(:airplanes) do
+      add(:name, :string)
+      add(:year, :integer)
+      add(:type, :string)
+      add(:seats, :integer)
+
+      timestamps()
+    end
   end
 end

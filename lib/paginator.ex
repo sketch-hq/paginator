@@ -335,18 +335,14 @@ defmodule Paginator do
   defp total_count(
          queryable,
          %Config{
-           total_count_limit: :infinity,
-           total_count_primary_key_field: total_count_primary_key_field
-         },
+           total_count_limit: :infinity
+         } = config,
          repo,
          repo_opts
        ) do
     result =
       queryable
-      |> exclude(:preload)
-      |> exclude(:select)
-      |> exclude(:order_by)
-      |> select([e], struct(e, [total_count_primary_key_field]))
+      |> prepare_query(config)
       |> subquery
       |> select(count("*"))
       |> repo.one(repo_opts)
@@ -357,20 +353,16 @@ defmodule Paginator do
   defp total_count(
          queryable,
          %Config{
-           total_count_limit: total_count_limit,
-           total_count_primary_key_field: total_count_primary_key_field
-         },
+           total_count_limit: total_count_limit
+         } = config,
          repo,
          repo_opts
        ) do
     result =
       queryable
-      |> exclude(:preload)
-      |> exclude(:select)
-      |> exclude(:order_by)
-      |> limit(^(total_count_limit + 1))
-      |> select([e], struct(e, [total_count_primary_key_field]))
+      |> prepare_query(config)
       |> subquery
+      |> limit(^(total_count_limit + 1))
       |> select(count("*"))
       |> repo.one(repo_opts)
 
@@ -378,6 +370,95 @@ defmodule Paginator do
       Enum.min([result, total_count_limit]),
       result > total_count_limit
     }
+  end
+
+  # Prepares for count a Query that contains a SubQuery
+  # First optimize combinations (unions) and then the queryable.
+  defp prepare_query(
+         %{from: %{source: %Ecto.SubQuery{query: query} = subquery} = from} = queryable,
+         config
+       ) do
+    query =
+      query
+      |> prepare_query_combinations(config)
+      |> optimize_query_for_count(config)
+
+    subquery =
+      subquery
+      |> Map.put(:query, query)
+
+    from =
+      from
+      |> Map.put(:source, subquery)
+
+    queryable
+    |> Map.put(:from, from)
+    |> optimize_query_for_count()
+  end
+
+  # Prepare for count any other Query that does not contain a SubQuery
+  # Also optimizes the combinations (e.g. unions) in it, by removing unneeded
+  # selects.
+  defp prepare_query(queryable, config) do
+    queryable
+    |> prepare_query_combinations(config)
+    |> optimize_query_for_count(config)
+  end
+
+  # Prepare nothing for a Query with empty list of combinations
+  defp prepare_query_combinations(%{combinations: []} = query, _), do: query
+
+  # Prepare the combinations list in a Query
+  # And return the updated Query
+  defp prepare_query_combinations(%{combinations: combinations} = query, config) do
+    query
+    |> Map.put(:combinations, prepare_query_combinations(combinations, config))
+  end
+
+  # Iterates over a list of combinations and prepares each combination for count
+  defp prepare_query_combinations([combination | list], config) do
+    [
+      combination |> prepare_query_combination(config)
+      | list |> prepare_query_combinations(config)
+    ]
+  end
+
+  # On empty list, returns an empty list
+  defp prepare_query_combinations([], _), do: []
+
+  # Prepare for count a UNION ALL combination
+  defp prepare_query_combination({:union_all, query}, config),
+    do: {:union_all, optimize_query_for_count(query, config)}
+
+  # Prepare for count a UNION combination
+  defp prepare_query_combination({:union, query}, config),
+    do: {:union, optimize_query_for_count(query, config)}
+
+  # Do nothing with any other type of combination
+  defp prepare_query_combination(combination, _), do: combination
+
+  # Optimizes a Query by removing unneeded statements
+  # and selects the primary key field for count, taken from config
+  defp optimize_query_for_count(
+         queryable,
+         %Config{
+           total_count_primary_key_field: total_count_primary_key_field
+         }
+       ) do
+    queryable
+    |> optimize_query_for_count()
+    |> select([e], struct(e, [total_count_primary_key_field]))
+  end
+
+  # Optimizes a Queryable when no count primary key field is supplied
+  defp optimize_query_for_count(queryable, _), do: optimize_query_for_count(queryable)
+
+  # Excludes unneeded statements from a Queryable, for count.
+  defp optimize_query_for_count(queryable) do
+    queryable
+    |> exclude(:preload)
+    |> exclude(:select)
+    |> exclude(:order_by)
   end
 
   # `sorted_entries` returns (limit+1) records, so before
