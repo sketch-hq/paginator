@@ -140,6 +140,36 @@ defmodule Paginator.ConfigTest do
         Config.validate!(config)
       end
     end
+
+    test "raises ArgumentError when after cursor does not match cursor_fields with schema" do
+      config =
+        Config.new(
+          cursor_fields: [{:person, :first_name}, {{:person, :last_name}, :asc}],
+          after:
+            Cursor.encode(%{
+              {:person, :first_name} => "Test 121",
+              {:person, :birth_date} => "1990-10-10"
+            })
+        )
+
+      assert_raise ArgumentError, "expected `:after` cursor to match `:cursor_fields`", fn ->
+        Config.validate!(config)
+      end
+    end
+
+    test "ok when after cursor matches cursor_fields with schema" do
+      config =
+        Config.new(
+          cursor_fields: [{:person, :first_name}, {{:person, :last_name}, :asc}],
+          after:
+            Cursor.encode(%{
+              {:person, :first_name} => "Test 121",
+              {:person, :last_name} => "Test"
+            })
+        )
+
+      Config.validate!(config)
+    end
   end
 
   def simple_after, do: Cursor.encode(%{id: "pay_123"})
