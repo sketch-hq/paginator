@@ -70,7 +70,7 @@ defmodule Paginator.Config do
 
   defp cursor_values_match_cursor_fields?(cursor_values, cursor_fields) do
     cursor_keys = cursor_values |> Map.keys() |> Enum.sort()
-    sorted_cursor_fields = cursor_fields |> Keyword.keys() |> Enum.sort()
+    sorted_cursor_fields = cursor_fields |> Enum.map(&elem(&1, 0)) |> Enum.sort()
 
     match?(^cursor_keys, sorted_cursor_fields)
   end

@@ -940,7 +940,12 @@ defmodule PaginatorTest do
     boats: {b1, b2, b3, b4, b5, b6},
     airplanes: {a1, a2, a3, a4, a5}
   } do
-    opts = [cursor_fields: [:year, :name, :type], sort_direction: :asc, limit: 4, include_total_count: true]
+    opts = [
+      cursor_fields: [:year, :name, :type],
+      sort_direction: :asc,
+      limit: 4,
+      include_total_count: true
+    ]
 
     page = airplanes_and_boats_by_year() |> Repo.paginate(opts)
 
@@ -954,6 +959,40 @@ defmodule PaginatorTest do
     page = airplanes_and_boats_by_year() |> Repo.paginate(opts ++ [after: page.metadata.after])
     assert to_uids(page.entries) == to_uids([a3, b3, b6])
     assert page.metadata.after == nil
+  end
+
+  for {order, direction} <- [{:desc_nulls_first, :desc}, {:asc_nulls_last, :asc}] do
+    test "paginates correctly when pages contains nulls - direction: #{direction}" do
+      customer = insert(:customer)
+
+      now = NaiveDateTime.utc_now()
+
+      for k <- 1..10 do
+        if Enum.random([true, false]) do
+          insert(:payment, customer: customer, charged_at: NaiveDateTime.add(now, k))
+        else
+          insert(:payment, customer: customer, charged_at: nil)
+        end
+      end
+
+      opts = [
+        cursor_fields: [:charged_at, :id],
+        sort_direction: unquote(direction),
+        limit: 1
+      ]
+
+      query =
+        unquote(order)
+        |> payments_by_charged_at()
+        |> where([payment], payment.customer_id == ^customer.id)
+
+      expected = query |> Repo.all(opts) |> to_ids()
+      after_pagination = paginate_as_list(query, opts)
+      before_pagination = paginate_before_as_list(query, opts)
+
+      assert after_pagination == expected
+      assert before_pagination == init([nil | expected])
+    end
   end
 
   defp to_ids(entries), do: Enum.map(entries, & &1.id)
@@ -993,6 +1032,7 @@ defmodule PaginatorTest do
   defp to_uid(%Boat{id: id}), do: to_uid(id, :boat)
   defp to_uid(%Airplane{id: id}), do: to_uid(id, :airplane)
   defp to_uid(%{uid: uid}), do: uid
+
   defp to_uid(id, type \\ :boat) when is_integer(id) do
     case type do
       :boat -> "b" <> Integer.to_string(id)
@@ -1010,14 +1050,14 @@ defmodule PaginatorTest do
 
     b1 = insert(:boat, %{name: "Black Pearl", year: 1708, type: "galleon", capacity: 250})
     b2 = insert(:boat, %{name: "RMS Titanic", year: 1911, type: "ocean liner", capacity: 3327})
-    b3 = insert(:boat, %{name: "Oceania", year: 2003, type: "tanker", capacity: 3166353})
+    b3 = insert(:boat, %{name: "Oceania", year: 2003, type: "tanker", capacity: 3_166_353})
     b4 = insert(:boat, %{name: "HMS Activity", year: 1942, type: "escort carrier", capacity: 10})
     b5 = insert(:boat, %{name: "USS Activity", year: 1942, type: "battleship", capacity: 2500})
-    b6 = insert(:boat, %{name: "Severodvinsk", year: 2010, type: "nuclear submarine", capacity: 90})
 
-    {:ok,
-      boats: {b1, b2, b3, b4, b5, b6},
-      airplanes: {a1, a2, a3, a4, a5}}
+    b6 =
+      insert(:boat, %{name: "Severodvinsk", year: 2010, type: "nuclear submarine", capacity: 90})
+
+    {:ok, boats: {b1, b2, b3, b4, b5, b6}, airplanes: {a1, a2, a3, a4, a5}}
   end
 
   defp create_data(context) do
@@ -1125,9 +1165,9 @@ defmodule PaginatorTest do
     boats_query = boats_struct_query()
 
     airplanes_struct_query()
-      |> union_all(^boats_query)
-      |> subquery()
-      |> order_by([:year, :name, :type])
+    |> union_all(^boats_query)
+    |> subquery()
+    |> order_by([:year, :name, :type])
   end
 
   defp encode_cursor(value) do
@@ -1142,5 +1182,50 @@ defmodule PaginatorTest do
 
   defp days_ago(days) do
     DT.add!(DateTime.utc_now(), -(days * 86400))
+  end
+
+  defp paginate_as_list(query, opts, mapf \\ &to_ids(&1.entries)) do
+    opts
+    |> Stream.unfold(fn
+      nil ->
+        nil
+
+      opts ->
+        page = Repo.paginate(query, opts)
+
+        if after_value = page.metadata.after do
+          {mapf.(page), Keyword.put(opts, :after, after_value)}
+        else
+          {mapf.(page), nil}
+        end
+    end)
+    |> Stream.flat_map(&Function.identity/1)
+    |> Enum.to_list()
+  end
+
+  defp paginate_before_as_list(query, opts) do
+    query
+    |> paginate_as_list(opts, &[&1.metadata.before])
+    |> Enum.flat_map(fn
+      nil ->
+        [nil]
+
+      before_cursor ->
+        Repo.paginate(query, Keyword.put(opts, :before, before_cursor))
+        |> Map.fetch!(:entries)
+        |> to_ids
+    end)
+  end
+
+  defp init([]) do
+    []
+  end
+
+  defp init([_]) do
+    []
+  end
+
+  defp init([x | xs]) do
+    [x | init(xs)]
   end
 end
