@@ -9,14 +9,8 @@ defmodule PaginatorTest do
   setup :create_data
 
   test "paginates forward", %{
-    payments: {p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12} = payments
+    payments: {p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12}
   } do
-    payments
-    |> Tuple.to_list()
-    |> Enum.with_index()
-    |> Enum.map(fn {p, i} -> {NaiveDateTime.to_iso8601(p.charged_at), p.id, "p#{i + 1}"} end)
-    |> Enum.sort()
-
     opts = [cursor_fields: [:charged_at, :id], sort_direction: :asc, limit: 4]
 
     page = payments_by_charged_at() |> Repo.paginate(opts)
