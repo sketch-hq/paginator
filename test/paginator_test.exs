@@ -702,7 +702,7 @@ defmodule PaginatorTest do
         |> Repo.paginate(
           cursor_fields: [:charged_at, :id],
           sort_direction: :desc,
-          after: encode_cursor(%{charged_at: nil, id: nil}),
+          after: encode_cursor(%{charged_at: nil, id: -1}),
           limit: 8
         )
 
@@ -961,36 +961,81 @@ defmodule PaginatorTest do
     assert page.metadata.after == nil
   end
 
-  for {order, direction} <- [{:desc_nulls_first, :desc}, {:asc_nulls_last, :asc}] do
-    test "paginates correctly when pages contains nulls - direction: #{direction}" do
+  @available_sorting_order [
+    :asc,
+    :asc_nulls_last,
+    :asc_nulls_first,
+    :desc,
+    :desc_nulls_first,
+    :desc_nulls_last
+  ]
+
+  for order <- @available_sorting_order do
+    test "throw an error if nulls are used in the last term - order_by charged_at #{order}" do
+      customer = insert(:customer)
+      insert(:payment, customer: customer, charged_at: NaiveDateTime.utc_now())
+      insert(:payment, customer: customer, charged_at: nil)
+      insert(:payment, customer: customer, charged_at: nil)
+
+      opts = [
+        cursor_fields: [charged_at: unquote(order)],
+        limit: 1
+      ]
+
+      query =
+        from(
+          p in Payment,
+          where: p.customer_id == ^customer.id,
+          order_by: [{^unquote(order), p.charged_at}],
+          select: p
+        )
+
+      assert_raise RuntimeError, fn -> paginate_as_list(query, opts) end
+    end
+  end
+
+  for field0_order <- @available_sorting_order, field1_order <- @available_sorting_order do
+    test "paginates correctly when pages contains nulls - order by charged_at #{field0_order}, id #{
+           field1_order
+         }" do
       customer = insert(:customer)
 
       now = NaiveDateTime.utc_now()
 
-      for k <- 1..10 do
+      for k <- 1..50 do
         if Enum.random([true, false]) do
-          insert(:payment, customer: customer, charged_at: NaiveDateTime.add(now, k))
+          if Enum.random([true, false]) do
+            insert(:payment, customer: customer, charged_at: NaiveDateTime.add(now, k))
+          else
+            insert(:payment, customer: customer, charged_at: NaiveDateTime.add(now, k - 1))
+          end
         else
           insert(:payment, customer: customer, charged_at: nil)
         end
       end
 
       opts = [
-        cursor_fields: [:charged_at, :id],
-        sort_direction: unquote(direction),
+        cursor_fields: [charged_at: unquote(field0_order), id: unquote(field1_order)],
         limit: 1
       ]
 
       query =
-        unquote(order)
-        |> payments_by_charged_at()
-        |> where([payment], payment.customer_id == ^customer.id)
+        from(
+          p in Payment,
+          where: p.customer_id == ^customer.id,
+          order_by: [{^unquote(field0_order), p.charged_at}, {^unquote(field1_order), p.id}],
+          select: p
+        )
 
-      expected = query |> Repo.all(opts) |> to_ids()
+      expected =
+        query
+        |> Repo.all(opts)
+        |> to_ids()
+
       after_pagination = paginate_as_list(query, opts)
-      before_pagination = paginate_before_as_list(query, opts)
-
       assert after_pagination == expected
+
+      before_pagination = paginate_before_as_list(query, opts)
       assert before_pagination == init([nil | expected])
     end
   end
