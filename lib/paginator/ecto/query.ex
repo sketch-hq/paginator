@@ -40,8 +40,14 @@ defmodule Paginator.Ecto.Query do
     value = Map.get(values, column)
     {q_position, q_binding} = column_position(query, column)
 
-    dynamic_filter_builder = DynamicFilterBuilder.builder!(order, cursor_direction, value)
-    dynamic_filter_builder.(q_position, q_binding, true)
+    DynamicFilterBuilder.build!(%{
+      sort_order: order,
+      direction: cursor_direction,
+      value: value,
+      entity_position: q_position,
+      column: q_binding,
+      next_filters: true
+    })
   end
 
   defp build_where_expression(query, [{column, order} | fields], values, cursor_direction) do
@@ -50,8 +56,14 @@ defmodule Paginator.Ecto.Query do
 
     filters = build_where_expression(query, fields, values, cursor_direction)
 
-    dynamic_filter_builder = DynamicFilterBuilder.builder!(order, cursor_direction, value)
-    dynamic_filter_builder.(q_position, q_binding, filters)
+    DynamicFilterBuilder.build!(%{
+      sort_order: order,
+      direction: cursor_direction,
+      value: value,
+      entity_position: q_position,
+      column: q_binding,
+      next_filters: filters
+    })
   end
 
   defp maybe_where(query, %Config{

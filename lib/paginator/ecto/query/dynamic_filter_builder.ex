@@ -1,8 +1,4 @@
 defmodule Paginator.Ecto.Query.DynamicFilterBuilder do
-  @type dynamic_filter_builder :: (integer(), term(), Ecto.Query.t() -> Ecto.Query.t())
-
-  @callback build_dynamic_filter(:after | :before, term()) :: dynamic_filter_builder()
-
   @dispatch_table %{
     desc: Paginator.Ecto.Query.DescNullsFirst,
     desc_nulls_first: Paginator.Ecto.Query.DescNullsFirst,
@@ -12,17 +8,43 @@ defmodule Paginator.Ecto.Query.DynamicFilterBuilder do
     asc_nulls_first: Paginator.Ecto.Query.AscNullsFirst
   }
 
-  @spec builder!(atom(), :after | :before, term()) :: dynamic_filter_builder()
-  def builder!(sort_order, direction, value) do
-    case Map.fetch(@dispatch_table, sort_order) do
+  @callback build_dynamic_filter(%{
+              direction: :after | :before,
+              entity_position: integer(),
+              column: term(),
+              value: term(),
+              next_filters: Ecto.Query.t()
+            }) :: Ecto.Query.t()
+
+  @type sort_order ::
+          :asc
+          | :asc_nulls_first
+          | :asc_nulls_desc
+          | :desc
+          | :desc_nulls_first
+          | :desc_nulls_last
+
+  @type direction :: :after | :before
+
+  @spec build!(%{
+          sort_order: sort_order(),
+          direction: direction(),
+          entity_position: integer(),
+          column: term(),
+          value: term(),
+          next_filters: Ecto.Query.t()
+        }) :: Ecto.Query.t()
+  def build!(input) do
+    case Map.fetch(@dispatch_table, input.sort_order) do
       {:ok, module} ->
-        apply(module, :build_dynamic_filter, [direction, value])
+        apply(module, :build_dynamic_filter, [input])
 
       :error ->
+        direction = input.direction
         available_sort_orders = Map.keys(@dispatch_table) |> Enum.join(", ")
 
         raise(
-          "Invalid sorting value :#{sort_order}, please please use either #{available_sort_orders}"
+          "Invalid sorting value :#{direction}, please please use either #{available_sort_orders}"
         )
     end
   end

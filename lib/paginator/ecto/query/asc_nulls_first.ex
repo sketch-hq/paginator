@@ -4,65 +4,57 @@ defmodule Paginator.Ecto.Query.AscNullsFirst do
   import Ecto.Query
 
   @impl Paginator.Ecto.Query.DynamicFilterBuilder
-  def build_dynamic_filter(:after, nil) do
-    fn
-      _, _, true ->
-        raise("unstable sort order: nullable columns can't be used as the last term")
-
-      position, binding, filters ->
-        dynamic(
-          [{query, position}],
-          (is_nil(field(query, ^binding)) and ^filters) or not is_nil(field(query, ^binding))
-        )
-    end
+  def build_dynamic_filter(%{direction: :after, value: nil, next_filters: true}) do
+    raise("unstable sort order: nullable columns can't be used as the last term")
   end
 
-  @impl Paginator.Ecto.Query.DynamicFilterBuilder
-  def build_dynamic_filter(:after, value) do
-    fn
-      position, binding, true ->
-        dynamic(
-          [{query, position}],
-          field(query, ^binding) > ^value
-        )
-
-      position, binding, filters ->
-        dynamic(
-          [{query, position}],
-          (field(query, ^binding) == ^value and ^filters) or field(query, ^binding) > ^value
-        )
-    end
+  def build_dynamic_filter(args = %{direction: :after, value: nil}) do
+    dynamic(
+      [{query, args.entity_position}],
+      (is_nil(field(query, ^args.column)) and ^args.next_filters) or
+        not is_nil(field(query, ^args.column))
+    )
   end
 
-  @impl Paginator.Ecto.Query.DynamicFilterBuilder
-  def build_dynamic_filter(:before, nil) do
-    fn
-      _, _, true ->
-        raise("unstable sort order: nullable columns can't be used as the last term")
-
-      position, binding, filters ->
-        dynamic(
-          [{query, position}],
-          is_nil(field(query, ^binding)) and ^filters
-        )
-    end
+  def build_dynamic_filter(args = %{direction: :after, next_filters: true}) do
+    dynamic(
+      [{query, args.entity_position}],
+      field(query, ^args.column) > ^args.value
+    )
   end
 
-  @impl Paginator.Ecto.Query.DynamicFilterBuilder
-  def build_dynamic_filter(:before, value) do
-    fn
-      position, binding, true ->
-        dynamic(
-          [{query, position}],
-          field(query, ^binding) < ^value or is_nil(field(query, ^binding))
-        )
+  def build_dynamic_filter(args = %{direction: :after}) do
+    dynamic(
+      [{query, args.entity_position}],
+      (field(query, ^args.column) == ^args.value and ^args.next_filters) or
+        field(query, ^args.column) > ^args.value
+    )
+  end
 
-      position, binding, filters ->
-        dynamic(
-          [{query, position}],
-          (field(query, ^binding) == ^value and ^filters) or field(query, ^binding) < ^value or
-            is_nil(field(query, ^binding))
-        )
-    end
+  def build_dynamic_filter(%{direction: :before, value: nil, next_filters: true}) do
+    raise("unstable sort order: nullable columns can't be used as the last term")
+  end
+
+  def build_dynamic_filter(args = %{direction: :before, value: nil}) do
+    dynamic(
+      [{query, args.entity_position}],
+      is_nil(field(query, ^args.column)) and ^args.next_filters
+    )
+  end
+
+  def build_dynamic_filter(args = %{direction: :before, next_filters: true}) do
+    dynamic(
+      [{query, args.entity_position}],
+      field(query, ^args.column) < ^args.value or is_nil(field(query, ^args.column))
+    )
+  end
+
+  def build_dynamic_filter(args = %{direction: :before}) do
+    dynamic(
+      [{query, args.entity_position}],
+      (field(query, ^args.column) == ^args.value and ^args.next_filters) or
+        field(query, ^args.column) < ^args.value or
+        is_nil(field(query, ^args.column))
+    )
   end
 end
