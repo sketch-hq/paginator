@@ -4,6 +4,7 @@ defmodule Paginator.Ecto.Query do
   import Ecto.Query
 
   alias Paginator.Config
+  alias Paginator.Ecto.Query.DynamicFilterBuilder
 
   def paginate(queryable, config \\ [])
 
@@ -16,22 +17,6 @@ defmodule Paginator.Ecto.Query do
   def paginate(queryable, opts) do
     config = Config.new(opts)
     paginate(queryable, config)
-  end
-
-  defp get_operator(:desc, :before, nil), do: :isnull
-  defp get_operator(:desc, :before, _not_nil), do: :gt
-  defp get_operator(:desc, :after, nil), do: :isnull_or_notisnull
-  defp get_operator(:desc, :after, _not_nil), do: :lt
-  defp get_operator(:asc, :before, nil), do: :isnull_or_notisnull
-  defp get_operator(:asc, :before, _not_nil), do: :lt
-  defp get_operator(:asc, :after, nil), do: :isnull
-  defp get_operator(:asc, :after, _not_nil), do: :gt
-
-  defp get_operator(direction, _, _),
-    do: raise("Invalid sorting value :#{direction}, please use either :asc or :desc")
-
-  defp get_operator_for_field(order, direction, value) do
-    get_operator(order, direction, value)
   end
 
   # This clause is responsible for transforming legacy list cursors into map cursors
@@ -55,11 +40,14 @@ defmodule Paginator.Ecto.Query do
     value = Map.get(values, column)
     {q_position, q_binding} = column_position(query, column)
 
-    case get_operator_for_field(order, cursor_direction, value) do
-      :lt -> dynamic([{q, q_position}], field(q, ^q_binding) < ^value)
-      :gt when not is_nil(value) -> dynamic([{q, q_position}], field(q, ^q_binding) > ^value)
-      _ -> true
-    end
+    DynamicFilterBuilder.build!(%{
+      sort_order: order,
+      direction: cursor_direction,
+      value: value,
+      entity_position: q_position,
+      column: q_binding,
+      next_filters: true
+    })
   end
 
   defp build_where_expression(query, [{column, order} | fields], values, cursor_direction) do
@@ -68,32 +56,14 @@ defmodule Paginator.Ecto.Query do
 
     filters = build_where_expression(query, fields, values, cursor_direction)
 
-    case get_operator_for_field(order, cursor_direction, value) do
-      :lt ->
-        dynamic(
-          [{q, q_position}],
-          (field(q, ^q_binding) == ^value and ^filters) or
-            field(q, ^q_binding) < ^value
-        )
-
-      :gt ->
-        dynamic(
-          [{q, q_position}],
-          (field(q, ^q_binding) == ^value and ^filters) or
-            field(q, ^q_binding) > ^value or
-            is_nil(field(q, ^q_binding))
-        )
-
-      :isnull ->
-        dynamic([{q, q_position}], is_nil(field(q, ^q_binding)) and ^filters)
-
-      :isnull_or_notisnull ->
-        dynamic(
-          [{q, q_position}],
-          (is_nil(field(q, ^q_binding)) and ^filters) or
-            not is_nil(field(q, ^q_binding))
-        )
-    end
+    DynamicFilterBuilder.build!(%{
+      sort_order: order,
+      direction: cursor_direction,
+      value: value,
+      entity_position: q_position,
+      column: q_binding,
+      next_filters: filters
+    })
   end
 
   defp maybe_where(query, %Config{
@@ -169,8 +139,10 @@ defmodule Paginator.Ecto.Query do
                 Enum.map(expr, fn
                   {:desc, ast} -> {:asc, ast}
                   {:desc_nulls_first, ast} -> {:asc_nulls_last, ast}
+                  {:desc_nulls_last, ast} -> {:asc_nulls_first, ast}
                   {:asc, ast} -> {:desc, ast}
                   {:asc_nulls_last, ast} -> {:desc_nulls_first, ast}
+                  {:asc_nulls_first, ast} -> {:desc_nulls_last, ast}
                 end)
           }
         end
